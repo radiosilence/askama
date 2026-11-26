@@ -19,6 +19,10 @@ mod integration;
 mod spans;
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "tooling")]
+pub mod tooling;
+#[cfg(not(feature = "tooling"))]
+mod tooling;
 
 #[doc(hidden)]
 #[cfg(feature = "proc-macro")]
@@ -434,13 +438,23 @@ fn build_template_item(
     let mut called_blocks = CalledBlocks::default();
 
     for (path, parsed) in &templates {
+        // A compiler gives every file the derive's own literal. A tooling host gives each
+        // file read from disk a located literal of its own, so its tokens point into it.
+        let literal = if crate::tooling::active()
+            && !(path == &input.path && matches!(input.source, crate::input::Source::Source(_)))
+        {
+            crate::tooling::source_span(path, parsed.source())
+                .unwrap_or_else(crate::spans::SourceSpan::empty)
+        } else {
+            input.source_span.clone()
+        };
         contexts.insert(
             path,
             Context::new(
                 input.config,
                 path,
                 parsed,
-                input.source_span.clone(),
+                literal,
                 input.template_span,
                 &mut called_blocks,
             )?,
@@ -510,7 +524,9 @@ impl CompileError {
     ) -> Self {
         // `Span::join` always return `None` if not on nightly. We use it to prevent not showing a
         // nice error message when not on nightly.
-        let span = if let Some(span) = span
+        // A tooling host's spans are located but do not join the call site; keep them.
+        let span = if !crate::tooling::active()
+            && let Some(span) = span
             && span.join(proc_macro2::Span::call_site()).is_none()
         {
             None
@@ -525,6 +541,16 @@ impl CompileError {
         file_info: Option<FileInfo<'_>>,
         span: Option<Span>,
     ) -> Self {
+        // A tooling host keeps a span that already points into a template, and otherwise
+        // places the error at the node its file info points to, which is more precise than
+        // the derive's attribute. Either way the message needs no location of its own.
+        let span = match span {
+            Some(span) if crate::tooling::in_template(span) => Some(span),
+            span => file_info
+                .as_ref()
+                .and_then(|info| crate::tooling::locate(info.path, info.source?, info.node_source?))
+                .or(span),
+        };
         let msg = match (span, file_info) {
             (None, Some(file_info)) => format!("{msg}{file_info}"),
             _ => msg.to_string(),

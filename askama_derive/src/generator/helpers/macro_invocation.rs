@@ -84,7 +84,14 @@ impl<'a, 'b> MacroInvocation<'a, 'b> {
             )?;
 
             this.flush_ws(self.macro_def.ws2);
-            size_hint += this.write_buf_writable(self.callsite_ctx, &mut content)?;
+            // Buffered expressions take their location from the context that writes them, so
+            // a tooling host writes the macro body's with the macro's own context.
+            let body_ctx = if crate::tooling::active() {
+                self.macro_ctx
+            } else {
+                self.callsite_ctx
+            };
+            size_hint += this.write_buf_writable(body_ctx, &mut content)?;
             let content = content.into_token_stream();
             quote_into!(buf, self.callsite_ctx.span_for_node(self.callsite_span), {{ #content }});
 
@@ -140,7 +147,12 @@ impl<'a, 'b> MacroInvocation<'a, 'b> {
 
                 // FIXME: Too many steps to get a string. Also, `visit_associated_item` returns
                 // stuff like `x.y`, how is this supposed to match a variable? O.o
-                let associated_item = associated_item_buf.into_token_stream().to_string();
+                let mut associated_item = associated_item_buf.into_token_stream().to_string();
+                if crate::tooling::active() {
+                    // Outside a compiler proc-macro2 prints `x.y` as `x . y`, but the lookup
+                    // below and `write_resolved` split on `.` and expect the compiler's `x.y`.
+                    associated_item.retain(|c| !c.is_whitespace());
+                }
                 let var = generator
                     .locals
                     .resolve(&associated_item)

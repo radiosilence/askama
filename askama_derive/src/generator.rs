@@ -163,7 +163,10 @@ impl<'a, 'h> Generator<'a, 'h> {
     fn rel_path<'p>(&mut self, path: &'p Path) -> Cow<'p, Path> {
         self.caller_dir()
             .and_then(|caller_dir| {
-                diff_paths(path, caller_dir, std::env::var("CARGO_MANIFEST_DIR").ok())
+                let manifest_dir = crate::tooling::manifest_dir()
+                    .and_then(|dir| dir.to_str().map(str::to_owned))
+                    .or_else(|| std::env::var("CARGO_MANIFEST_DIR").ok());
+                diff_paths(path, caller_dir, manifest_dir)
             })
             .map_or(Cow::Borrowed(path), Cow::Owned)
     }
@@ -173,6 +176,14 @@ impl<'a, 'h> Generator<'a, 'h> {
             CallerDir::Valid(ref caller_dir) => return Some(caller_dir.as_path()),
             CallerDir::Invalid => return None,
             CallerDir::Unresolved => {}
+        }
+
+        if let Some(caller_dir) = crate::tooling::caller_dir() {
+            self.caller_dir = CallerDir::Valid(clean_path(&caller_dir));
+            return match &self.caller_dir {
+                CallerDir::Valid(caller_dir) => Some(caller_dir.as_path()),
+                _ => None, // unreachable
+            };
         }
 
         if proc_macro::is_available()

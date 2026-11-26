@@ -72,4 +72,8 @@ nightly-spans = []
 proc-macro = ["proc-macro2/proc-macro"]
 serde_json = []
 std = ["alloc"]
+tooling = [
+    "external-sources",
+    "proc-macro2/span-locations",
+]
 urlencode = []

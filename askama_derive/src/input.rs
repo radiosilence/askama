@@ -743,6 +743,28 @@ pub(crate) fn get_template_source(
     static CACHE: std::sync::OnceLock<crate::OnceMap<Arc<Path>, Arc<str>>> =
         std::sync::OnceLock::new();
 
+    // A tooling host's files change between expansions, so they bypass the cache.
+    if let Some(read) = crate::tooling::read(tpl_path) {
+        return match read {
+            Ok(mut source) => {
+                if source.ends_with('\n') {
+                    let _ = source.pop();
+                }
+                Ok(Arc::from(source))
+            }
+            Err(err) => Err(CompileError::new(
+                format_args!(
+                    "unable to open template file '{}' (absolute path: '{}'): {err}",
+                    original_path,
+                    tpl_path.display(),
+                ),
+                import_from.map(|(node_file, file_source, node_source)| {
+                    FileInfo::new(node_file, Some(file_source), Some(node_source))
+                }),
+            )),
+        };
+    }
+
     CACHE
         .get_or_init(crate::OnceMap::default)
         .get_or_try_insert(

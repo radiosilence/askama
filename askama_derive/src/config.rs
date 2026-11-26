@@ -193,13 +193,13 @@ impl Config {
         let path = 'find_path: {
             if let Some(root) = start_at {
                 let relative = root.with_file_name(path);
-                if relative.exists() {
+                if crate::tooling::exists(&relative).unwrap_or_else(|| relative.exists()) {
                     break 'find_path relative;
                 }
             }
             for dir in &self.dirs {
                 let rooted = dir.join(path);
-                if rooted.exists() {
+                if crate::tooling::exists(&rooted).unwrap_or_else(|| rooted.exists()) {
                     break 'find_path rooted;
                 }
             }
@@ -317,6 +317,10 @@ impl SyntaxAndCache {
         source: Arc<str>,
         source_path: Option<Arc<Path>>,
     ) -> Result<Arc<Parsed>, ParseError> {
+        // Keyed by content, the cache would keep every edit a tooling host makes.
+        if crate::tooling::active() {
+            return Parsed::new(source, source_path, &self.syntax).map(Arc::new);
+        }
         self.cache.get_or_try_insert(
             &SyntaxAndCacheKey {
                 source: Cow::Owned(source),
@@ -393,6 +397,25 @@ pub(crate) fn read_config_file(
         None => root.join(CONFIG_FILE_NAME),
     };
 
+    if let Some(read) = crate::tooling::read(&filename) {
+        return match read {
+            Ok(content) => Ok((content, filename.canonicalize().ok())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound && config_path.is_none() => {
+                Ok((String::new(), None))
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                Err(CompileError::no_file_info(
+                    format_args!("`{}` does not exist", filename.display()),
+                    span,
+                ))
+            }
+            Err(err) => Err(CompileError::no_file_info(
+                format_args!("unable to read {}: {err}", filename.display()),
+                span,
+            )),
+        };
+    }
+
     if filename.exists() {
         let content = fs::read_to_string(&filename).map_err(|err| {
             CompileError::no_file_info(
@@ -412,7 +435,9 @@ pub(crate) fn read_config_file(
 }
 
 fn manifest_root() -> PathBuf {
-    env::var_os("CARGO_MANIFEST_DIR").map_or_else(|| PathBuf::from("."), PathBuf::from)
+    crate::tooling::manifest_dir().unwrap_or_else(|| {
+        env::var_os("CARGO_MANIFEST_DIR").map_or_else(|| PathBuf::from("."), PathBuf::from)
+    })
 }
 
 fn str_set(vals: &[&'static str]) -> Vec<Cow<'static, str>> {

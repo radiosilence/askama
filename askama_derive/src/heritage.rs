@@ -201,7 +201,7 @@ impl<'a> Context<'a> {
     }
 
     pub(crate) fn span_for_node(&self, node: Span) -> proc_macro2::Span {
-        if proc_macro::is_available()
+        if (proc_macro::is_available() || crate::tooling::active())
             && let Some(range) = node.byte_range()
             && let Some(span) = self.literal.content_subspan(range)
         {

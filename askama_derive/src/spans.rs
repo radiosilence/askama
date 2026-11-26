@@ -25,6 +25,15 @@ impl SourceSpan {
         Self::Empty(Span::call_site())
     }
 
+    /// A source whose text sits unescaped at `prefix..prefix + len` inside `literal`.
+    #[cfg_attr(not(feature = "tooling"), allow(dead_code))]
+    pub(crate) fn located(literal: Literal, prefix: usize, len: usize) -> Self {
+        Self::Source(SpannedSource {
+            literal,
+            positions: vec![(0, prefix), (len, prefix + len)],
+        })
+    }
+
     pub(crate) fn from_source(source: LitStr) -> Result<(String, Self), CompileError> {
         let (source, span) = SpannedSource::new(source)?;
         Ok((source, Self::Source(span)))
