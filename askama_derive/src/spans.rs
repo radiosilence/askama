@@ -84,6 +84,15 @@ impl SpannedSource {
     fn content_subspan(&self, bytes: Range<usize>) -> Option<Span> {
         let start = self.find_position(bytes.start);
         let end = self.find_position(bytes.end);
+        // Outside a compiler, proc-macro2 counts positions within a literal in characters
+        // where rustc counts bytes, so a byte offset past a non-ASCII character would land
+        // that many bytes too far.
+        #[cfg(feature = "tooling")]
+        if crate::tooling::active() {
+            let text = self.literal.to_string();
+            let chars = |at: usize| Some(text.get(..at)?.chars().count());
+            return self.literal.subspan(chars(start)?..chars(end)?);
+        }
         self.literal.subspan(start..end)
     }
 
